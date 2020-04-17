@@ -1,24 +1,38 @@
 from pyspark import SparkContext
-from pyspark.sql import SparkSession
 from pyspark.streaming import StreamingContext
 from pyspark.mllib.clustering import KMeansModel
-from pyspark.sql.types import StructType
 import numpy as np
 import sys
 import os
 from pyspark.statcounter import StatCounter
-from pyspark.sql import SparkSession
-from pyspark.sql.functions import explode
-from pyspark.sql.functions import split, window
 
-EXPECTED_LABEL = 5
-#EXPECTED_LABEL = 1
+#EXPECTED_LABEL = 5
+EXPECTED_LABEL = 1
 kmeanstrained = None
 
-def printOp(taken):
+def parse_line(line):
+    val = line.split(',')
+
+    if not len(val) == 2:
+        print('Invalid value!: {}'.format(val))
+        return []
+
+
+    try:
+        v = float(val[1])
+    except ValueError:
+        print('Invalid value.. {}'.format(val[1]))
+        v = 0.0
+
+    return [(val[0], v)]
+
+def average(x, y):
+    return (x+y) / 2.0
+
+def printOp(rdd):
     global kmeanstrained
     global EXPECTED_LABEL
-    #taken = rdd.collect()
+    taken = rdd.collect()
     vals = []
     for t in taken:
         try:
@@ -41,13 +55,6 @@ def takeAction():
     print('************ Action being taken *************')
     print()
 
-def processBatch(df, wn):
-    vals = df.rdd.map(lambda x: (x['type'], x['avg(value)'])) \
-                 .combineByKey(lambda x: StatCounter([x]), StatCounter.merge, StatCounter.mergeStats) \
-                 .mapValues(StatCounter.mean) \
-                 .collect()
-    printOp(vals)
-
 if __name__ == '__main__':
     args = sys.argv
     
@@ -65,12 +72,9 @@ if __name__ == '__main__':
         except ValueError:
             windowSize = 3
 
-    spark = SparkSession \
-        .builder \
-        .appName("CPU Multi Structured Streaming") \
-        .getOrCreate()
+    sc = SparkContext("local[2]", "CpuUsageStreaming")
+    ssc = StreamingContext(sc, windowSize)
 
-    sc = spark.sparkContext
     # load model
     if not os.path.exists(modelpath):
         print('KMeans model not found, train it first...')
@@ -80,19 +84,17 @@ if __name__ == '__main__':
         clusters = KMeansModel.load(sc, modelpath)
 
     kmeanstrained = clusters
-
-    userSchema = StructType().add('type', 'string').add('timestamp', 'timestamp').add('value', 'float')
-    streams = None
+    streams = []
     for directory in directories:
-        if streams is None:
-            streams = spark.readStream.format('file').schema(userSchema).csv(directory)
-        else:
-            strm = spark.readStream.format('file').schema(userSchema).csv(directory)
-            streams = streams.union(strm)
+        streams.append(ssc.textFileStream(directory))
 
-    windowedDf = streams.groupBy('type', window('timestamp', '{} seconds'.format(windowSize), '{} seconds'.format(windowSize))).avg()
+    allstreams = ssc.union(*streams)
+
+    #means = streams.flatMap(parse_line).combineByKey(lambda x: StatCounter([x]), StatCounter.merge, StatCounter.mergeStats).mapValues(StatCounter.mean)
+    means = allstreams.flatMap(parse_line).combineByKey(lambda x: StatCounter([x]), StatCounter.merge, StatCounter.mergeStats).mapValues(StatCounter.mean)
+    means.foreachRDD(printOp)
 
     print('Starting stream listener, window size: {}s'.format(windowSize))
-    query = windowedDf.writeStream.outputMode('complete').format('console').foreachBatch(processBatch).start()
-    query.awaitTermination()
+    ssc.start()
+    ssc.awaitTermination()
 
