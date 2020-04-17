@@ -35,16 +35,26 @@ if __name__ == '__main__':
     disklines.extend(['0' for _ in range(maxlines - len(disklines))])
     netlines.extend(['0' for _ in range(maxlines - len(netlines))])
 
-    lines = list(zip(cpulines, disklines, netlines)) # Create tuples of the form (cpuval, diskval, netval)
+    #lines = list(zip(cpulines, disklines, netlines)) # Create tuples of the form (cpuval, diskval, netval)
 
     i = 0
-    while i < len(lines):
-        end = random.randint(i, min(len(lines), i+max_lines_batch))
+    while i < len(cpulines):
+        end = random.randint(i, min(len(cpulines), i+max_lines_batch))
         print('Writing {} lines...'.format(end - i))
-        with open('{}/{}.csv'.format(outdir, random.randint(1,10000)), 'w') as f:
-            vals = lines[i:end]
-            towrite = [','.join(x) for x in vals]
-            f.writelines('\n'.join(towrite))
+        with open('{}_cpu/{}.csv'.format(outdir, random.randint(1,10000)), 'w') as f:
+            vals = cpulines[i:end]
+            towrite = ['\n'.join(['cpu,{}'.format(x) for x in vals])]
+            f.writelines(towrite)
+
+        with open('{}_disk/{}.csv'.format(outdir, random.randint(1,10000)), 'w') as f:
+            vals = disklines[i:end]
+            towrite = ['\n'.join(['disk,{}'.format(x) for x in vals])]
+            f.writelines(towrite)
+
+        with open('{}_net/{}.csv'.format(outdir, random.randint(1,10000)), 'w') as f:
+            vals = netlines[i:end]
+            towrite = ['\n'.join(['net,{}'.format(x) for x in vals])]
+            f.writelines(towrite)
 
         i = end
         print('Sleeping...')
