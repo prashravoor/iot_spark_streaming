@@ -11,7 +11,8 @@ from pyspark.sql import SparkSession
 from pyspark.sql.functions import explode
 from pyspark.sql.functions import split, window
 
-EXPECTED_LABEL = 5
+EXPECTED_LABEL = 7
+#EXPECTED_LABEL = 5
 #EXPECTED_LABEL = 1
 kmeanstrained = None
 
@@ -42,7 +43,9 @@ def takeAction():
     print()
 
 def processBatch(df, wn):
-    vals = df.rdd.map(lambda x: (x['type'], x['avg(value)'])) \
+    #df.show(20, False)
+    vals = df.rdd.filter(lambda x: x['type'] in ['cpu', 'disk', 'net']) \
+                 .map(lambda x: (x['type'], x['avg(value)'])) \
                  .combineByKey(lambda x: StatCounter([x]), StatCounter.merge, StatCounter.mergeStats) \
                  .mapValues(StatCounter.mean) \
                  .collect()
@@ -82,17 +85,23 @@ if __name__ == '__main__':
     kmeanstrained = clusters
 
     userSchema = StructType().add('type', 'string').add('timestamp', 'timestamp').add('value', 'float')
-    streams = None
+    windowedDf = None
+    streams = []
     for directory in directories:
-        if streams is None:
-            streams = spark.readStream.format('file').schema(userSchema).csv(directory)
-        else:
-            strm = spark.readStream.format('file').schema(userSchema).csv(directory)
-            streams = streams.union(strm)
+        strm = spark.readStream.format('file').schema(userSchema).csv(directory)
+        strm.groupBy(
+                        'type',
+                         window('timestamp', '{} seconds'.format(windowSize),
+                                 '{} seconds'.format(max(0, windowSize-2)))
+                    )
+        streams.append(strm)
 
-    windowedDf = streams.groupBy('type', window('timestamp', '{} seconds'.format(windowSize), '{} seconds'.format(windowSize))).avg()
+        if windowedDf is None:
+            windowedDf = strm
+        else:
+            windowedDf = windowedDf.union(strm)
 
     print('Starting stream listener, window size: {}s'.format(windowSize))
-    query = windowedDf.writeStream.outputMode('complete').format('console').foreachBatch(processBatch).start()
+    query = windowedDf.groupBy('type').avg().writeStream.outputMode('complete').format('console').foreachBatch(processBatch).start()
     query.awaitTermination()
 

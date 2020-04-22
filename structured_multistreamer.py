@@ -14,8 +14,8 @@ if __name__ == '__main__':
     cpu = args[2]
     disk = args[3]
     net = args[4]
-    random.seed(8192) # works for 2 sec window
-    #random.seed(42)
+    #random.seed(8192) # works for 2 sec window
+    random.seed(420)
 
     max_lines_batch = 1000
     sleep_time = 2
